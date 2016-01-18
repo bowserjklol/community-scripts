@@ -9,6 +9,7 @@
 // Ref: https://support.f5.com/kb/en-us/solutions/public/6000/900/sol6917.html
 // Author: kingthorin+owaspzap@gmail.com
 // 20150828 - Initial submission
+// 20160117 - Updated to include ipv6 variants - jkbowser[at]gmail[dot]com
 
 function scan(ps, msg, src) {
 	//Setup some details we will need for alerts later if we find something
@@ -43,8 +44,14 @@ function scan(ps, msg, src) {
 				//Decode Port
 				thePort=decodePort(cookieChunks[1]);
 
-				if(isIPv4Local(theIP)) { //RFC1918
-					decodedValue=theIP+':'+thePort;
+				if(isLocal(theIP)) { //RFC1918
+
+					if(theIP.match(/:/g))//matching again just so I can format it correctly with []
+					{
+						decodedValue='[' + theIP +']:' + thePort;	
+					} else {
+						decodedValue=theIP+':'+thePort;
+					}
 					alertOtherInfo=cookieValue+" decoded to "+decodedValue;
 					//ps.raiseAlert(risk, confidence, title, description, url, param, attack, otherinfo, solution, evidence, cweId, wascId, msg);
 					ps.raiseAlert(alertRisk, alertConfidence, alertTitle, alertDesc, url, 
@@ -59,25 +66,58 @@ function scan(ps, msg, src) {
 }
 
 function decodeIP(ipChunk) {
-	backwardIpHex = java.net.InetAddress.getByName(ipChunk);
-	backwardAddress = backwardIpHex.getHostAddress();
-	ipPieces = backwardAddress.split("\\.");
-	theIP = ipPieces[3]+'.'+ipPieces[2]+'.'+ipPieces[1]+'.'+ipPieces[0]
-	return(theIP)
+
+	//this is our check for IPv6 cookie.  BigIP F5 documentation says all are prefixed with "vi"
+	if(ipChunk.substring(0,2)=="vi")
+	{
+    
+    	//get rid of the prefixed vi
+    	ipChunk = ipChunk.substring(2)
+
+    	//create array in groups of 4.
+    	//makes vi20010112000000900000000000000030 into 2001,0112,0000,0090,0000,0000,0000,0030
+    	var encodedIP = ipChunk.match(/[0-9a-f]{4}/ig);
+    
+    	//first, cast array to string
+    	//replace , with :
+    	//replace any 0000 with a empty string
+    	//then finally replace any ::: (or more) with just two :: to align with accepted IPv6 shorthand
+    	ipv6 = encodedIP.toString().replace(/,/g,":").replace(/([0]{4})/g,"").replace(/(:{3,})/g,"::")
+    	return(ipv6)
+
+    } else { //not ipv6, so process it as ipv4
+
+		backwardIpHex = java.net.InetAddress.getByName(ipChunk);
+		backwardAddress = backwardIpHex.getHostAddress();
+		ipPieces = backwardAddress.split("\\.");
+		theIP = ipPieces[3]+'.'+ipPieces[2]+'.'+ipPieces[1]+'.'+ipPieces[0]
+		return(theIP)
+	}
 }
 
-function isIPv4Local(ip) {
-	try {
-		if(java.net.Inet4Address.getByName(ip).isSiteLocalAddress())
-			return true //RFC1918 and IPv4
-	} catch (e) {
-		return false //Not IPv4
+function isLocal(ip) {
+	
+	if(ip.match(/:/g)){ //match on ipv6 notation
+
+		try {
+			if(java.net.Inet6Address.getByName(ip)) //isSiteLocalAddress - available but not applicable for IPv6 re: http://www.ietf.org/rfc/rfc3879.txt.  Just validating format.
+				return true //it is ipv6, may or may not be local
+		} catch (e) {
+			return false //not ipv6
+		}
+
+	} else {
+		try {
+			if(java.net.Inet4Address.getByName(ip).isSiteLocalAddress())
+				return true //RFC1918 and IPv4
+		} catch (e) {
+			return false //Not IPv4
+		}
 	}
-	return false //Not RFC1918
 }
 	
 
-function decodePort(portChunk) {
+function decodePort(portChunk) { //port processing is same for ipv4 and ipv6
 	backwardPortHex = java.lang.Integer.toHexString(java.lang.Integer.parseInt(portChunk));
 	assembledPortHex = backwardPortHex.substring(2,4)+backwardPortHex.substring(0,2)
 	thePort = java.lang.Integer.parseInt(assembledPortHex, 16);
@@ -86,4 +126,3 @@ function decodePort(portChunk) {
 
 // TODO List
 //Handle IPv4 pool members in non-default route domains
-//Handle IPv6 variants
