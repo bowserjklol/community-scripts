@@ -13,10 +13,12 @@
 
 function scan(ps, msg, src) {
 	//Setup some details we will need for alerts later if we find something
-	alertRisk = 1
+	alertRisk = [1, 0]
 	alertConfidence = 3
-	alertTitle = 'Internal IP Exposed via F5 BigIP Persistence Cookie'
-	alertDesc = 'The F5 Big-IP Persistence cookie set for this website can be decoded to a specific internal IP and port. An attacker may leverage this information to conduct Social Engineering attacks or other exploits.'
+	alertTitle = ['Internal IP Exposed via F5 BigIP Persistence Cookie'
+				, 'IP Exposed via F5 BigIP Presistence Cookie']
+	alertDesc = ['The F5 Big-IP Persistence cookie set for this website can be decoded to a specific internal IP and port. An attacker may leverage this information to conduct Social Engineering attacks or other exploits.'
+				,'The F5 Big-IP Persistence cookie set for this website can be decoded to a specific IP and port. An attacker may leverage this information to conduct Social Engineering attacks or other exploits.']
 	alertSolution = 'Configure BIG-IP cookie encryption.'
 	alertRefs = 'https://support.f5.com/kb/en-us/solutions/public/6000/900/sol6917.html'
 	cweId = 311
@@ -44,7 +46,7 @@ function scan(ps, msg, src) {
 				//Decode Port
 				thePort=decodePort(cookieChunks[1]);
 
-				if(isLocal(theIP)) { //RFC1918
+				if(isLocal(theIP)) { //RFC1918 and RFC4193
 
 					if(theIP.match(/:/g))//matching again just so I can format it correctly with []
 					{
@@ -54,10 +56,26 @@ function scan(ps, msg, src) {
 					}
 					alertOtherInfo=cookieValue+" decoded to "+decodedValue;
 					//ps.raiseAlert(risk, confidence, title, description, url, param, attack, otherinfo, solution, evidence, cweId, wascId, msg);
-					ps.raiseAlert(alertRisk, alertConfidence, alertTitle, alertDesc, url, 
+					ps.raiseAlert(alertRisk[0], alertConfidence, alertTitle[0], alertDesc[0], url, 
 						cookieName, '', alertOtherInfo, alertSolution+'\n'+alertRefs, 
 						cookieValue, cweId, wascId, msg);
-				} else { //Not what we're looking for
+
+				} else if(isExternal(theIP)){
+
+					if(theIP.match(/:/g))//matching again just so I can format it correctly with []
+					{
+						decodedValue='[' + theIP +']:' + thePort;	
+					} else {
+						decodedValue=theIP+':'+thePort;
+					}
+					alertOtherInfo=cookieValue+" decoded to "+decodedValue;
+					//ps.raiseAlert(risk, confidence, title, description, url, param, attack, otherinfo, solution, evidence, cweId, wascId, msg);
+					ps.raiseAlert(alertRisk[1], alertConfidence, alertTitle[1], alertDesc[1], url, 
+						cookieName, '', alertOtherInfo, alertSolution+'\n'+alertRefs, 
+						cookieValue, cweId, wascId, msg);
+				}
+
+				else { //Not what we're looking for
 					return 
 				}
 			}
@@ -70,7 +88,6 @@ function decodeIP(ipChunk) {
 	//this is our check for IPv6 cookie.  BigIP F5 documentation says all are prefixed with "vi"
 	if(ipChunk.substring(0,2)=="vi")
 	{
-    
     	//get rid of the prefixed vi
     	ipChunk = ipChunk.substring(2)
 
@@ -98,20 +115,44 @@ function decodeIP(ipChunk) {
 function isLocal(ip) {
 	
 	if(ip.match(/:/g)){ //match on ipv6 notation
-
 		try {
-			if(java.net.Inet6Address.getByName(ip)) //isSiteLocalAddress - available but not applicable for IPv6 re: http://www.ietf.org/rfc/rfc3879.txt.  Just validating format.
-				return true //it is ipv6, may or may not be local
+			//isSiteLocalAddress only returns true for FEC0, using RFC4193 definition of fc00, matching on beginning string regexp
+			if(java.net.Inet6Address.getByName(ip) && ip.match(/(^fc00)/im)) { 
+				return true //it is local per RFC4193
+			} 
 		} catch (e) {
-			return false //not ipv6
+			return false //not confirmed local ipv6
 		}
 
 	} else {
 		try {
-			if(java.net.Inet4Address.getByName(ip).isSiteLocalAddress())
+			if(java.net.Inet4Address.getByName(ip).isSiteLocalAddress()) {
 				return true //RFC1918 and IPv4
+			} 
 		} catch (e) {
-			return false //Not IPv4
+			return false //Not confirmed local IPv4
+		}
+	}
+}
+
+function isExternal(ip) {
+	
+	if(ip.match(/:/g)){ //match on ipv6 notation
+		try {
+			if(java.net.Inet6Address.getByName(ip)) { //just testing for valid format to verify it's not encrypted
+				return true //it is a valid IP, likely external
+			} 
+		} catch (e) {
+			return false //Not ipv6, so it's likely an encrypted cookie
+		}
+
+	} else {
+		try {
+			if(java.net.Inet4Address.getByName(ip)) { //just testing for valid format to verify it's not encrypted
+				return true //it is a valid IP, likely external
+			} 
+		} catch (e) {
+			return false //Not ipv4, so it's likely an encrypted cookie
 		}
 	}
 }
@@ -126,3 +167,4 @@ function decodePort(portChunk) { //port processing is same for ipv4 and ipv6
 
 // TODO List
 //Handle IPv4 pool members in non-default route domains
+//Handle IPv6 pool members in non-default route domains
