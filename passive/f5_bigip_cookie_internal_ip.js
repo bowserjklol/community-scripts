@@ -36,7 +36,7 @@ function scan(ps, msg, src) {
 			cookieValue=cookiesArr[idx].getValue();
 			if(cookieName.toLowerCase().contains("bigip") &&
 			  !cookieValue.toLowerCase().contains("deleted")) {
-				cookieChunks = cookieValue.split("\\."); //i.e.: 3860990474.36895.0000
+				cookieChunks = cookieValue.split(getDelim()); //i.e.: 3860990474.36895.0000
 				//Decode IP
 				try {
 					theIP=decodeIP(cookieChunks[0]);
@@ -106,7 +106,7 @@ function decodeIP(ipChunk) {
 
 		backwardIpHex = java.net.InetAddress.getByName(ipChunk);
 		backwardAddress = backwardIpHex.getHostAddress();
-		ipPieces = backwardAddress.split("\\.");
+		ipPieces = backwardAddress.split(getDelim());
 		theIP = ipPieces[3]+'.'+ipPieces[2]+'.'+ipPieces[1]+'.'+ipPieces[0]
 		return(theIP)
 	}
@@ -163,6 +163,14 @@ function decodePort(portChunk) { //port processing is same for ipv4 and ipv6
 	assembledPortHex = backwardPortHex.substring(2,4)+backwardPortHex.substring(0,2)
 	thePort = java.lang.Integer.parseInt(assembledPortHex, 16);
 	return(thePort)
+}
+
+function getDelim() {
+    //It seems Rhino and Nashhorn behave differently for splitting on period
+    if (java.lang.System.getProperty("java.version").startsWith("1.8")) {
+        return "\.";
+    }
+    return "\\.";
 }
 
 // TODO List
